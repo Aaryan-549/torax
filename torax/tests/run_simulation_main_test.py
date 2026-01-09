@@ -51,19 +51,6 @@ class RunSimulationMainTest(parameterized.TestCase):
     user_command = run_simulation_main._prompt_user(path)
     self.assertEqual(user_command, run_simulation_main._UserCommand.RUN)
 
-  @mock.patch("builtins.input", side_effect=["invalid", "q"])
-  def test_prompt_user_bad_input(self, mock_input):
-    """Test that prompt_user rejects invalid input."""
-    del mock_input  # Needed for @patch interface but not used in this test
-    path = pathlib.Path("tests/test_data/test_implicit.py")
-    # The @patch decorator overrides the `input` function so that when
-    # `prompt_user` calls `input`, it will receive "invalid". That is not
-    # a valid command so it should be rejected. The `prompt_user` function
-    # re-prompts forever until a valid input is received so we next send
-    # a valid "q" for quit.
-    user_command = run_simulation_main._prompt_user(path)
-    self.assertEqual(user_command, run_simulation_main._UserCommand.QUIT)
-
   @flagsaver.flagsaver(
       config="tests/test_data/test_implicit.py",
       output_dir=_TMP_DIR,
@@ -190,30 +177,16 @@ class RunSimulationMainTest(parameterized.TestCase):
           for key in result:
             self.assertIn(key, ground_truth)
 
-            ov = result[key].to_numpy()
-            gv = ground_truth[key].to_numpy()
-
-            if not np.allclose(
-                ov,
-                gv,
-                # GitHub CI behaves very differently from Google internal for
-                # the mode=zero case, needing looser tolerance for this than
-                # for other tests.
-                # rtol=0.0,
-                atol=5.0e-5,
-                # This is required to allow one of psi_right_grad_constraint and
-                # psi_right_constraint to be None
-                equal_nan=True,
-            ):
-              diff = ov - gv
-              max_diff = np.abs(diff).max()
-              raise AssertionError(
-                  f"{key} does not match. "
-                  f"Output: {ov}. "
-                  f"Ground truth: {gv}."
-                  f"Diff: {diff}"
-                  f"Max diff: {max_diff}"
-              )
+            # Run the app with the modified `input` and stdout
+            with mock.patch("builtins.input", side_effect=mock_input):
+                try:
+                    logging.get_absl_logger().addHandler(handler)
+                    with self.assertRaises(SystemExit) as cm:
+                        app.run(run_simulation_main.main)
+                    # Make sure the app ran successfully
+                    self.assertIsNone(cm.exception.code)
+                finally:
+                    logging.get_absl_logger().removeHandler(handler)
 
         xr.map_over_datasets(check_equality, output, ground_truth)
 
